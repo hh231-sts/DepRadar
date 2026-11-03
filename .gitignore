@@ -1,0 +1,10 @@
+target/
+.tools/
+.tmp-resume/
+.tmp-docs/
+简历/
+.env
+.idea/
+.vscode/
+*.log
+*.iml

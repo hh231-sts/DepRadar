@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: depradar
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/depradar?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
+    username: ${DB_USER:depradar}
+    password: ${DB_PASSWORD:depradar-local}
+    hikari:
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  rabbitmq:
+    host: ${MQ_HOST:localhost}
+    port: ${MQ_PORT:5672}
+    username: ${MQ_USER:depradar}
+    password: ${MQ_PASSWORD:depradar-local}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        default-requeue-rejected: false
+        concurrency: 2
+        prefetch: 1
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+server:
+  error:
+    include-message: always
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    arg-name-based-constructor-auto-mapping: true
+    default-statement-timeout: 30
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,redis,rabbit
+depradar:
+  osv-mode: ${OSV_MODE:replay}
+  osv-url: https://api.osv.dev
+  batch-size: 50
+  max-active-scans: 5
+  scan-requests-per-minute: 10
+  lease-seconds: 120
+  max-attempts: 3
+  scheduling: true

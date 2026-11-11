@@ -35,7 +35,15 @@ public class CatalogService {
     public byte[] raw(String release) { access.release(release,Access.Right.READ);return db.raw(release).rawSbom(); }
     public Values.Page<CatalogMapper.Component> components(String release,String cursor) { access.release(release,Access.Right.READ);return Values.page(db.componentPage(release,cursor),CatalogMapper.Component::id); }
     public Object graph(String release) {
-        var r=access.release(release,Access.Right.READ);String key="depradar:graph:"+release+":"+r.sbomHash();
+        String missingKey="depradar:release:missing:"+release;
+        if(Boolean.TRUE.equals(redis.hasKey(missingKey))) throw Problem.missing("版本不存在");
+        var r=db.release(release);
+        if(r==null) {
+            redis.opsForValue().set(missingKey,"1",Duration.ofSeconds(30));
+            throw Problem.missing("版本不存在");
+        }
+        access.project(r.projectId(),Access.Right.READ);
+        String key="depradar:graph:"+release+":"+r.sbomHash();
         String cached=redis.opsForValue().get(key);if(cached!=null) return json.read(cached);
         var graph=Map.of("root",r.rootRef(),"components",db.components(release),"edges",db.edges(release));
         redis.opsForValue().set(key,json.write(graph),Duration.ofHours(1));return graph;

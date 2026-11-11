@@ -6,6 +6,7 @@ import io.depradar.governance.GovernanceService;
 import io.depradar.identity.*;
 import io.depradar.report.ReportService;
 import io.depradar.scan.ScanService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.io.IOException;
@@ -21,8 +22,9 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/v1")
 public class ApiController {
     private final IdentityService identity;private final CatalogService catalog;private final ScanService scans;private final ReportService reports;private final GovernanceService governance;private final CiService ci;private final Access access;
-    public ApiController(IdentityService identity,CatalogService catalog,ScanService scans,ReportService reports,GovernanceService governance,CiService ci,Access access) {
-        this.identity=identity;this.catalog=catalog;this.scans=scans;this.reports=reports;this.governance=governance;this.ci=ci;this.access=access;
+    private final DependenciesRateLimiter dependenciesRateLimiter;
+    public ApiController(IdentityService identity,CatalogService catalog,ScanService scans,ReportService reports,GovernanceService governance,CiService ci,Access access,DependenciesRateLimiter dependenciesRateLimiter) {
+        this.identity=identity;this.catalog=catalog;this.scans=scans;this.reports=reports;this.governance=governance;this.ci=ci;this.access=access;this.dependenciesRateLimiter=dependenciesRateLimiter;
     }
     public record Name(@NotBlank @Size(max=120) String name) {}
     public record Member(@NotBlank @Size(max=190) String name,@NotBlank String role) {}
@@ -44,7 +46,7 @@ public class ApiController {
     @GetMapping("/releases/{release}") public Object release(@PathVariable String release) {return catalog.release(release);}
     @GetMapping(value="/releases/{release}/sbom",produces=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<byte[]> raw(@PathVariable String release) {return ResponseEntity.ok().header("Content-Disposition","attachment; filename=\"sbom.json\"").body(catalog.raw(release));}
     @GetMapping("/releases/{release}/components") public Object components(@PathVariable String release,@RequestParam(required=false) String cursor) {return catalog.components(release,cursor);}
-    @GetMapping("/releases/{release}/dependencies") public Object dependencies(@PathVariable String release) {return catalog.graph(release);}
+    @GetMapping("/releases/{release}/dependencies") public Object dependencies(@PathVariable String release,HttpServletRequest request) {dependenciesRateLimiter.check(request);return catalog.graph(release);}
     @GetMapping("/releases/{release}/scans") public Object scans(@PathVariable String release,@RequestParam(required=false) String cursor) {return scans.list(release,cursor);}
     @PostMapping("/releases/{release}/scans") public ResponseEntity<?> scan(@PathVariable String release,@RequestHeader(value="Idempotency-Key",required=false) String key) {var scan=scans.submit(release,key);return ResponseEntity.accepted().location(URI.create("/api/v1/scans/"+scan.id())).body(scan);}
     @GetMapping("/scans/{scan}") public Object progress(@PathVariable String scan) {return scans.progress(scan);}

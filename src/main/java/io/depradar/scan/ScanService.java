@@ -15,16 +15,22 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ScanService {
     private final ScanMapper db; private final CatalogMapper catalog;private final CatalogService catalogs;private final Access access;private final StringRedisTemplate redis;private final Clock clock;
+    private final RedisAvailability availability;
     @Value("${depradar.batch-size}") private int batchSize;
     @Value("${depradar.max-active-scans}") private int maxActive;
     @Value("${depradar.scan-requests-per-minute}") private int rate;
-    public ScanService(ScanMapper db,CatalogMapper catalog,CatalogService catalogs,Access access,StringRedisTemplate redis,Clock clock) { this.db=db;this.catalog=catalog;this.catalogs=catalogs;this.access=access;this.redis=redis;this.clock=clock; }
+    public ScanService(ScanMapper db,CatalogMapper catalog,CatalogService catalogs,Access access,StringRedisTemplate redis,Clock clock,RedisAvailability availability) { this.db=db;this.catalog=catalog;this.catalogs=catalogs;this.access=access;this.redis=redis;this.clock=clock;this.availability=availability; }
     @Transactional public ScanMapper.Scan submit(String release,String key) {
         var r=access.release(release,Access.Right.WRITE);var p=catalog.lockProject(r.projectId());
         String hash=Values.hash(release),old=catalogs.replay(p.id(),"SCAN",key,hash);
         if(old!=null) return db.scan(old);
         long minute=clock.instant().getEpochSecond()/60;
-        Long count=redis.execute(new DefaultRedisScript<>("local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],120) end; return n",Long.class),List.of("depradar:scan-rate:"+p.id()+":"+minute));
+        Long count;
+        try {
+            count=availability.execute(()->redis.execute(new DefaultRedisScript<>("local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],120) end; return n",Long.class),List.of("depradar:scan-rate:"+p.id()+":"+minute)));
+        } catch(RedisAvailability.Unavailable e) {
+            throw new Problem(HttpStatus.SERVICE_UNAVAILABLE,"扫描提交暂不可用，请稍后重试");
+        }
         if(count>rate) throw new Problem(HttpStatus.TOO_MANY_REQUESTS,"项目每分钟最多提交 "+rate+" 次扫描");
         if(db.active(p.id())>=maxActive) throw new Problem(HttpStatus.TOO_MANY_REQUESTS,"项目并发扫描配额已满");
         catalog.lockRelease(release);var latest=db.latest(release);String id=Values.id();

@@ -46,7 +46,7 @@ public class ApiController {
     @GetMapping("/releases/{release}") public Object release(@PathVariable String release) {return catalog.release(release);}
     @GetMapping(value="/releases/{release}/sbom",produces=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<byte[]> raw(@PathVariable String release) {return ResponseEntity.ok().header("Content-Disposition","attachment; filename=\"sbom.json\"").body(catalog.raw(release));}
     @GetMapping("/releases/{release}/components") public Object components(@PathVariable String release,@RequestParam(required=false) String cursor) {return catalog.components(release,cursor);}
-    @GetMapping("/releases/{release}/dependencies") public Object dependencies(@PathVariable String release,HttpServletRequest request) {dependenciesRateLimiter.check(request);return catalog.graph(release);}
+    @GetMapping("/releases/{release}/dependencies") public Object dependencies(@PathVariable String release,HttpServletRequest request) {var fallback=dependenciesRateLimiter.check(request);return catalog.graph(release,fallback);}
     @GetMapping("/releases/{release}/scans") public Object scans(@PathVariable String release,@RequestParam(required=false) String cursor) {return scans.list(release,cursor);}
     @PostMapping("/releases/{release}/scans") public ResponseEntity<?> scan(@PathVariable String release,@RequestHeader(value="Idempotency-Key",required=false) String key) {var scan=scans.submit(release,key);return ResponseEntity.accepted().location(URI.create("/api/v1/scans/"+scan.id())).body(scan);}
     @GetMapping("/scans/{scan}") public Object progress(@PathVariable String scan) {return scans.progress(scan);}

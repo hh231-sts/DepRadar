@@ -11,6 +11,8 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      connect-timeout: 500ms
+      timeout: 500ms
   rabbitmq:
     host: ${MQ_HOST:localhost}
     port: ${MQ_PORT:5672}
@@ -51,7 +53,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,db,redis,rabbit
+          include: readinessState,db,rabbit
 depradar:
   osv-mode: ${OSV_MODE:replay}
   osv-url: https://api.osv.dev

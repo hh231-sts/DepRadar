@@ -4,6 +4,7 @@ import io.depradar.identity.Access;
 import io.depradar.shared.*;
 import java.time.Duration;
 import java.util.*;
+import java.util.function.Supplier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,7 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CatalogService {
     private final CatalogMapper db; private final Access access; private final SbomParser parser; private final StringRedisTemplate redis; private final Json json;
-    public CatalogService(CatalogMapper db,Access access,SbomParser parser,StringRedisTemplate redis,Json json) { this.db=db;this.access=access;this.parser=parser;this.redis=redis;this.json=json; }
+    private final RedisAvailability availability;
+    public CatalogService(CatalogMapper db,Access access,SbomParser parser,StringRedisTemplate redis,Json json,RedisAvailability availability) { this.db=db;this.access=access;this.parser=parser;this.redis=redis;this.json=json;this.availability=availability; }
     @Transactional public CatalogMapper.Project createProject(String team,String name) {
         access.team(team,Access.Right.WRITE);String id=Values.id();db.addProject(id,team,name);db.defaultPolicy(id,access.human());return db.project(id);
     }
@@ -34,19 +36,27 @@ public class CatalogService {
     }
     public byte[] raw(String release) { access.release(release,Access.Right.READ);return db.raw(release).rawSbom(); }
     public Values.Page<CatalogMapper.Component> components(String release,String cursor) { access.release(release,Access.Right.READ);return Values.page(db.componentPage(release,cursor),CatalogMapper.Component::id); }
-    public Object graph(String release) {
+    public Object graph(String release,Runnable onRedisUnavailable) {
         String missingKey="depradar:release:missing:"+release;
-        if(Boolean.TRUE.equals(redis.hasKey(missingKey))) throw Problem.missing("版本不存在");
+        if(Boolean.TRUE.equals(readCache(()->redis.hasKey(missingKey),onRedisUnavailable))) throw Problem.missing("版本不存在");
         var r=db.release(release);
         if(r==null) {
-            redis.opsForValue().set(missingKey,"1",Duration.ofSeconds(30));
+            writeCache(missingKey,"1",Duration.ofSeconds(30));
             throw Problem.missing("版本不存在");
         }
         access.project(r.projectId(),Access.Right.READ);
         String key="depradar:graph:"+release+":"+r.sbomHash();
-        String cached=redis.opsForValue().get(key);if(cached!=null) return json.read(cached);
+        String cached=readCache(()->redis.opsForValue().get(key),onRedisUnavailable);if(cached!=null) return json.read(cached);
         var graph=Map.of("root",r.rootRef(),"components",db.components(release),"edges",db.edges(release));
-        redis.opsForValue().set(key,json.write(graph),Duration.ofHours(1));return graph;
+        writeCache(key,json.write(graph),Duration.ofHours(1));return graph;
+    }
+    private <T> T readCache(Supplier<T> read,Runnable onRedisUnavailable) {
+        try {return availability.execute(read);}
+        catch(RedisAvailability.Unavailable e) {onRedisUnavailable.run();return null;}
+    }
+    private void writeCache(String key,String value,Duration ttl) {
+        try {availability.execute(()->{redis.opsForValue().set(key,value,ttl);return null;});}
+        catch(RedisAvailability.Unavailable e) { /* The database result is already available. */ }
     }
     public String replay(String project,String operation,String key,String hash) {
         if(key==null) return null;
